@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -euo pipefail
+
+USE_DEVELOP_ENV_DIR="${USE_DEVELOP_ENV_DIR:-$HOME/.local/use_environments}"
+
+find_file_upward() {
+    local filename="$1"
+    local current_dir="$PWD"
+    
+    while [ "$current_dir" != "/" ]; do
+        if [ -f "$current_dir/$filename" ]; then
+            echo "$current_dir/$filename"
+            return 0
+        fi
+        current_dir=$(dirname "$current_dir")
+    done
+    return 1
+}
+
+run_nix_develop() {
+    local flake_dir="$1"
+    if [ -n "${USE_DEVELOP_SHELL:-}" ]; then
+        exec nix develop "$flake_dir" -c "$USE_DEVELOP_SHELL"
+    else
+        exec nix develop "$flake_dir"
+    fi
+}
+
+if flake_path=$(find_file_upward "flake.nix"); then
+    run_nix_develop "$(dirname "$flake_path")"
+    exit 0
+fi
+
+if env_file=$(find_file_upward ".use_env"); then
+    env_name=$(cat "$env_file")
+    [ -z "$env_name" ] && env_name=$(basename "$(dirname "$env_file")")
+    
+    flake_path="$USE_DEVELOP_ENV_DIR/$env_name/flake.nix"
+    if [ ! -f "$flake_path" ]; then
+        echo "Environment $env_name was not found at $flake_path" >&2
+        exit 1
+    fi
+    
+    run_nix_develop "$(dirname "$flake_path")"
+    exit 0
+fi
+
+echo "No flake.nix or .use_env file found in current directory or parent directories" >&2
+exit 1
